@@ -1,0 +1,11 @@
+# 截图识字 —— 核心依赖
+# 注意：onnxruntime 与 onnxruntime-directml 必须同时安装，
+# 只装 directml 版会缺少部分 API，只装普通版则没有 GPU 加速。
+rapidocr-onnxruntime==1.4.4
+onnxruntime==1.31.1
+onnxruntime-directml==1.24.4
+opencv-python==5.0.0.93
+Pillow==13.0.0
+numpy==2.5.4
+PySide6==6.12.0
+pynput==1.8.2

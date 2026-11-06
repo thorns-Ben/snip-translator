@@ -1,0 +1,32 @@
+# 本地私有文件，请勿提交或分享
+# 依赖、缓存、日志
+__pycache__/
+*.py[cod]
+.venv/
+
+# 密钥与本地配置
+llm_config.py
+startup_error.log
+
+# 测试产物
+test_input.png
+guitest_grab.png
+*.preview.png
+_preview.png
+_dbg*.png
+_e2e_out.txt
+test-artifacts/
+Screenshots/
+
+# 本地环境变量、日志与构建缓存
+.env
+.env.*
+!.env.example
+*.log
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+release/
+settings.json
+*.egg-info/
