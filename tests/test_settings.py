@@ -245,7 +245,8 @@ class DialogTests(unittest.TestCase):
         dialog = SettingsDialog()
         dialog.api_key_edit.setText("draft-secret")
         dialog.model_edit.setText("draft-model")
-        with patch("jietu.settings_dialog.test_connection", return_value=True) as test:
+        with patch("jietu.settings_dialog.test_connection_detail",
+                   return_value=(True, "连接成功（测试未保存设置）。")) as test:
             dialog._start_test()
             self.assertFalse(dialog.test_button.isEnabled())
             QThreadPool.globalInstance().waitForDone(3000)

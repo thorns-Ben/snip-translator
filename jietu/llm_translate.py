@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import socket
+import urllib.error
 import urllib.request
 
 from . import settings
@@ -85,6 +87,21 @@ def _http_post(url: str, payload: dict, api_key: str, timeout: int) -> dict:
         opener = urllib.request.build_opener(NoRedirect)
         with opener.open(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        safe = {
+            400: "HTTP 400：请求格式或模型参数不被服务接受。",
+            401: "HTTP 401：API Key 无效或已失效。",
+            403: "HTTP 403：当前 Key 没有使用该模型的权限。",
+            404: "HTTP 404：接口地址不完整，应以 /chat/completions 结尾。",
+            429: "HTTP 429：请求过于频繁或账户额度不足。",
+        }.get(exc.code, f"HTTP {exc.code}：翻译服务拒绝了请求。")
+        raise RuntimeError(safe) from None
+    except (socket.timeout, TimeoutError):
+        raise RuntimeError("请求超时：请检查网络或稍后重试。") from None
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, (socket.timeout, TimeoutError)):
+            raise RuntimeError("请求超时：请检查网络或稍后重试。") from None
+        raise RuntimeError("网络无法连接：请检查网络和接口地址。") from None
     except Exception:
         raise RuntimeError("LLM 请求失败，请检查网络、地址、模型及凭据。") from None
 

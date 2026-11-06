@@ -5,10 +5,11 @@ from __future__ import annotations
 import base64
 import ctypes
 from ctypes import wintypes
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import importlib
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -35,6 +36,23 @@ def settings_path() -> Path:
     from .paths import app_data_dir
 
     return Path(app_data_dir()) / "settings.json"
+
+
+def normalize_api_url(url: str) -> str:
+    """Accept a service base such as .../v4 and append the chat endpoint."""
+    value = url.strip().rstrip("/")
+    try:
+        path = urlsplit(value).path.rstrip("/")
+    except ValueError:
+        return value
+    last = path.rsplit("/", 1)[-1].lower()
+    if last == "chat" or last == "completions":
+        return value
+    if last == "chat/completions" or path.endswith("/chat/completions"):
+        return value
+    if re.fullmatch(r"v\d+(?:\.\d+)*", last):
+        return value + "/chat/completions"
+    return value
 
 
 def validate_settings(config: TranslationSettings) -> None:
@@ -139,7 +157,8 @@ def load_settings() -> TranslationSettings:
         encrypted = obj["api_key_dpapi"]
         key = (_dpapi(base64.b64decode(encrypted, validate=True), decrypt=True)
                .decode("utf-8") if encrypted else "")
-        config = TranslationSettings(obj["enabled"], obj["api_url"], obj["model"], key)
+        config = TranslationSettings(obj["enabled"], normalize_api_url(obj["api_url"]),
+                                     obj["model"], key)
         validate_settings(config)
         return config
     except Exception:
@@ -148,6 +167,7 @@ def load_settings() -> TranslationSettings:
 
 def save_settings(config: TranslationSettings) -> None:
     """Encrypt before writing, then atomically replace the JSON in the same directory."""
+    config = replace(config, api_url=normalize_api_url(config.api_url))
     validate_settings(config)
     temporary = None
     try:

@@ -1,5 +1,7 @@
 """Native settings form. Opening/cancelling never writes or contacts the network."""
 
+from dataclasses import replace
+
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
@@ -9,12 +11,15 @@ from PySide6.QtWidgets import (
 from . import settings
 
 
-def test_connection(config: settings.TranslationSettings) -> bool:
-    """Test only the supplied draft; no load, save, translation text or raw errors."""
+def test_connection_detail(config: settings.TranslationSettings):
+    """Return (connected, safe reason) for the supplied draft only."""
     try:
+        config = replace(
+            config, api_url=settings.normalize_api_url(config.api_url)
+        )
         settings.validate_settings(config)
         if not config.enabled or not config.api_key:
-            return False
+            return False, "请先启用 LLM 并填写 API Key。"
         from .llm_translate import _http_post
 
         data = _http_post(config.api_url, {
@@ -23,13 +28,25 @@ def test_connection(config: settings.TranslationSettings) -> bool:
             "max_tokens": 8,
             "stream": False,
         }, config.api_key, 8)
-        return bool(data.get("choices", [{}])[0].get("message", {}).get("content"))
-    except Exception:
-        return False
+        if data.get("choices", [{}])[0].get("message", {}).get("content"):
+            return True, "连接成功（测试未保存设置）。"
+        return False, "服务已连接，但返回内容为空，请检查模型名称。"
+    except settings.SettingsError as exc:
+        return False, str(exc)
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, RuntimeError) else ""
+        if not message or config.api_key in message:
+            message = "连接失败，请检查网络、HTTPS 地址、模型及 API Key。"
+        return False, message
+
+
+def test_connection(config: settings.TranslationSettings) -> bool:
+    """Compatibility boolean wrapper used by existing tests."""
+    return test_connection_detail(config)[0]
 
 
 class _TestSignals(QObject):
-    finished = Signal(bool)
+    finished = Signal(bool, str)
 
 
 class _TestWorker(QRunnable):
@@ -39,7 +56,7 @@ class _TestWorker(QRunnable):
         self.signals = _TestSignals()
 
     def run(self):
-        self.signals.finished.emit(test_connection(self.config))
+        self.signals.finished.emit(*test_connection_detail(self.config))
 
 
 class SettingsDialog(QDialog):
@@ -152,9 +169,10 @@ class SettingsDialog(QDialog):
         self._worker = worker
         QThreadPool.globalInstance().start(worker)
 
-    @Slot(bool)
-    def _test_finished(self, success):
+    @Slot(bool, str)
+    def _test_finished(self, success, message):
         self.test_button.setEnabled(True)
-        self.status_label.setText("连接成功（测试未保存设置）。" if success else
-                                  "连接失败，请检查网络、HTTPS 地址、模型及 API Key。")
+        self.status_label.setText(message if message else
+                                  ("连接成功（测试未保存设置）。" if success else
+                                   "连接失败，请检查网络、HTTPS 地址、模型及 API Key。"))
         self._worker = None
