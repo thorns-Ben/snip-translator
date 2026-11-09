@@ -100,6 +100,7 @@ class App(QObject):
         self._ocr_generation = 0
         self._capture_mode = MODE_TRANSLATE
         self.programmer_mode = False
+        self.target_lang = "zh-Hans"
         self.hotkeys: HotkeyManager | None = None
         self._hotkey_labels: dict[int, str] = {}
 
@@ -378,7 +379,9 @@ class App(QObject):
             return
         self.overlay.save_dir = self.save_dir
         self.overlay.set_programmer_mode(self.programmer_mode)
+        self.overlay.set_target_language(self.target_lang)
         self.overlay.mode_changed = self._on_overlay_mode_changed
+        self.overlay.target_changed = self._on_overlay_target_changed
         self.overlay.pin_requested.connect(self._on_pin_requested)
         if self.overlay.mode == MODE_TRANSLATE:
             self.overlay.selection_changed.connect(self._on_selection)
@@ -449,6 +452,13 @@ class App(QObject):
         self.window.btn_programmer.setChecked(enabled)
         self._ocr_generation += 1
 
+    def _on_overlay_target_changed(self, target: str):
+        self.target_lang = "en" if target == "en" else "zh-Hans"
+        self.window.lang_dst.setCurrentText(
+            "英语" if self.target_lang == "en" else "简体中文"
+        )
+        self._ocr_generation += 1
+
     def _on_selection(self, pixmap, selection_rect):
         """选区稳定（框选完成 / 移动 / 缩放结束）后触发识别。"""
         overlay = self.overlay
@@ -505,11 +515,12 @@ class App(QObject):
 
     def _start_translate(self, text, overlay, generation):
         mode = "programmer" if self.programmer_mode else "general"
+        target = "en" if self.target_lang == "en" else "zh-Hans"
 
         def work():
             try:
                 result = ocr_engine.translate(
-                    text, source="auto", target="zh-Hans", mode=mode,
+                    text, source="auto", target=target, mode=mode,
                 )
                 err = None
             except Exception as exc:

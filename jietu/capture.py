@@ -153,6 +153,14 @@ class _ResultPanel(QWidget):
         self.btn_programmer.setToolTip("程序员翻译：保留标识符、API、路径、URL 和代码结构")
         self.btn_programmer.clicked.connect(overlay.toggle_programmer_mode)
         head.addWidget(self.btn_programmer)
+        self.btn_target = QPushButton("中→英")
+        self.btn_target.setObjectName("pMode")
+        self.btn_target.setCheckable(True)
+        self.btn_target.setCursor(Qt.PointingHandCursor)
+        self.btn_target.setFixedHeight(20)
+        self.btn_target.setToolTip("把识别到的中文翻译成英文；再点一次恢复中文")
+        self.btn_target.clicked.connect(overlay.toggle_target_language)
+        head.addWidget(self.btn_target)
         self.btn_close = QPushButton("✕")
         self.btn_close.setObjectName("pClose")
         self.btn_close.setCursor(Qt.PointingHandCursor)
@@ -279,7 +287,9 @@ class CaptureOverlay(QWidget):
         self._source_text = ""
         self._result_text = ""
         self.programmer_mode = False
+        self.target_lang = "zh-Hans"
         self.mode_changed = None  # 可选回调：签名 (bool)
+        self.target_changed = None  # 可选回调：签名 (str)
 
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
@@ -289,6 +299,7 @@ class CaptureOverlay(QWidget):
         self.panel = _ResultPanel(self)
         self.panel.hide()
         self.panel.btn_programmer.setChecked(self.programmer_mode)
+        self.panel.btn_target.setChecked(self.target_lang == "en")
 
         self.session = None
         if mode == MODE_SNIP:
@@ -524,6 +535,25 @@ class CaptureOverlay(QWidget):
         self.programmer_mode = bool(enabled)
         self.panel.btn_programmer.setChecked(self.programmer_mode)
 
+    def toggle_target_language(self, to_english: bool):
+        self.target_lang = "en" if to_english else "zh-Hans"
+        self.panel.btn_target.setChecked(self.target_lang == "en")
+        if self.target_changed:
+            self.target_changed(self.target_lang)
+        if self._sel:
+            self._debounce.stop()
+            if self._source_text:
+                self.begin_result()
+                self.panel.set_status("重新翻译…")
+                self.retranslate_requested.emit(self._source_text)
+            else:
+                self.begin_result()
+                self._emit_selection()
+
+    def set_target_language(self, target: str):
+        self.target_lang = "en" if target == "en" else "zh-Hans"
+        self.panel.btn_target.setChecked(self.target_lang == "en")
+
     # ---------------------------------------------------- 结果区（供上层调用）
     def begin_result(self):
         """选区确定后立即调用：显示面板并进入"识别中"。"""
@@ -540,7 +570,12 @@ class CaptureOverlay(QWidget):
     def show_translation(self, text: str, notes=None):
         # notes 仅为兼容旧调用；标识符解释已由 ocr_engine 并入 text
         self._result_text = text
-        self.panel.set_status("已翻译 · 代码模式" if self.programmer_mode else "已翻译")
+        parts = ["已翻译"]
+        if self.programmer_mode:
+            parts.append("代码模式")
+        if self.target_lang == "en":
+            parts.append("英文")
+        self.panel.set_status(" · ".join(parts))
         self.panel.set_text(text)
         self._place_panel()
 

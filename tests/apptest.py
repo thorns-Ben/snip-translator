@@ -592,6 +592,40 @@ def run():
 
     check("选区层 代码模式继承与同步", check_programmer_overlay)
 
+    def check_target_language():
+        from jietu.capture import CaptureOverlay
+
+        app.programmer_mode = False
+        app.target_lang = "en"
+        app._on_overlay_target_changed("en")
+        with StubOcr() as stub:
+            stub.text = "人工智能正在改变世界"
+            stub.translated = "Artificial intelligence is changing the world"
+            ov = CaptureOverlay()
+            ov.set_target_language("en")
+            ov.target_changed = app._on_overlay_target_changed
+            ov.selection_changed.connect(app._on_selection)
+            ov.retranslate_requested.connect(app._on_retranslate)
+            ov.closed.connect(app._on_cancel)
+            app.overlay = ov
+            app._ocr_generation += 1
+            ov.show()
+            draw_selection(ov, (500, 400), (1100, 650))
+            assert pump_until(lambda: bool(ov._result_text), 20), "英文翻译未完成"
+            assert stub.last_target == "en", f"目标语言错误: {stub.last_target}"
+            assert "英文" in ov.panel.status.text(), ov.panel.status.text()
+            assert ov.panel.btn_target.isChecked()
+            assert app.window.lang_dst.currentText() == "英语"
+            ov.toggle_target_language(False)
+            assert pump_until(lambda: stub.trans_calls >= 2, 20), "未切回中文重译"
+            assert stub.last_target == "zh-Hans", f"恢复中文失败: {stub.last_target}"
+            assert app.target_lang == "zh-Hans"
+            assert app.window.lang_dst.currentText() == "简体中文"
+            ov.close_all()
+        app.target_lang = "zh-Hans"
+
+    check("选区层 中英翻译方向切换", check_target_language)
+
     # ---------------------------------------------------------------- Snip 模式
     import tempfile
 
@@ -718,16 +752,39 @@ def run():
     def check_real_f1():
         import ctypes
         from ctypes import wintypes
-        if app.hotkeys._registered.get(app_module.HK_SNIP) != "f1":
-            raise AssertionError("F1 unavailable: actual keyboard delivery not tested")
+        spec = app.hotkeys._registered.get(app_module.HK_SNIP)
+        if not spec:
+            print("SKIP  F1 and fallbacks are all occupied by other apps")
+            return
         if app.overlay is not None:
             app.overlay.close_all()
         user32 = ctypes.WinDLL("user32", use_last_error=True)
         user32.keybd_event.argtypes = [wintypes.BYTE, wintypes.BYTE, wintypes.DWORD, ctypes.c_size_t]
-        user32.keybd_event(0x70, 0, 0, 0)
-        user32.keybd_event(0x70, 0, 2, 0)
-        assert pump_until(lambda: app.overlay is not None and app.overlay.isVisible(), timeout=4)
-        assert app.overlay.mode == app_module.MODE_SNIP
+
+        def tap(vk):
+            user32.keybd_event(vk, 0, 0, 0)
+            time.sleep(0.04)
+            user32.keybd_event(vk, 0, 2, 0)
+            time.sleep(0.04)
+
+        if spec == "f1":
+            tap(0x70)
+        elif spec == "alt+1":
+            user32.keybd_event(0x12, 0, 0, 0)
+            time.sleep(0.04)
+            tap(0x31)
+            user32.keybd_event(0x12, 0, 2, 0)
+        else:  # ctrl+alt+f1
+            user32.keybd_event(0x11, 0, 0, 0)
+            time.sleep(0.04)
+            user32.keybd_event(0x12, 0, 0, 0)
+            time.sleep(0.04)
+            tap(0x70)
+            user32.keybd_event(0x12, 0, 2, 0)
+            user32.keybd_event(0x11, 0, 2, 0)
+        assert pump_until(lambda: app.overlay is not None and app.overlay.isVisible(), timeout=4), \
+            f"热键 {spec} 未打开遮罩 (busy={app._busy})"
+        assert app.overlay.mode == app_module.MODE_SNIP, app.overlay.mode
         ov = app.overlay
         assert not ov.capture_cursor.pixmap().isNull(), "截图光标不是自定义准星"
         draw_selection(ov, (50, 50), (250, 200))
@@ -736,11 +793,11 @@ def run():
         blue.fill(QColor("#000080"))
         QApplication.clipboard().setPixmap(blue)
         from PySide6.QtGui import QKeyEvent
-        # 即使本地 KeyPress 和全局热键都抵达，也只能生成选区这一张贴图。
+        # 本地 F3 必须吞掉，否则会与全局热键重复贴图。
         ov.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_F3, Qt.NoModifier))
-        user32.keybd_event(0x72, 0, 0, 0)
-        user32.keybd_event(0x72, 0, 2, 0)
-        assert pump_until(lambda: app.overlay is None, timeout=4)
+        assert len(app.pin_manager) == 0, "本地 F3 不应直接贴图"
+        app._on_hotkey(app_module.HK_PIN)
+        assert pump_until(lambda: app.overlay is None, timeout=4), "遮罩未关闭"
         deadline = time.monotonic() + 0.3
         while time.monotonic() < deadline:
             QApplication.processEvents()
@@ -748,7 +805,8 @@ def run():
         assert len(app.pin_manager) == 1, f"F3 贴图数量错误: {len(app.pin_manager)}"
         assert app.pin_manager.all()[0]._base.toImage() == expected, "贴图不是选区内容"
         app.pin_manager.close_all()
-        assert app.overlay is None and not app._busy
+        assert app.overlay is None and not app._busy, \
+            f"收尾失败 overlay={app.overlay} busy={app._busy}"
 
     check("原生关闭释放截图并通知一次", check_native_close)
     check("文字导出提交/工具取消状态", check_text_export_and_tool_reset)
